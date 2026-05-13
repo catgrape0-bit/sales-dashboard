@@ -27,6 +27,7 @@ Build a production-grade, mobile-first PWA "AL ZAHEER RETAIL RATELIST PANEL" —
 - Recent searches (last 5)
 
 ## What's Been Implemented (13 Feb 2026)
+- ✅ **Unified product list per brand** — single source of truth (`products` array). Sales view shows Sales columns (Model, Variant, Invoice, FFP, Whole Sale, IFB); Admin view shows Admin columns (Model, Variant, Invoice, WSP, CM, PP, Final, PRM) — both pull from the **same row**, so admin edits sync to sales view instantly. Auto-migration converts older split `salesList`/`adminList` data on load. Row form in admin shows both Sales-view + Admin-only sections.
 - ✅ **Master Password gate** — alphanumeric (min 6 chars) password that protects ALL PIN management actions: Change Admin PIN, Set/Change/Remove Category PIN, Change Master Password itself. To change the master password, current master password must be entered. If not set, no gate (back-compat). Triggered via Settings → Admin Account → Master Password.
 - ✅ **Font switched to Inter** — single clean sans-serif across the app for a simple modern tech feel (replaced Playfair Display + DM Sans).
 - ✅ **Per-Category PIN protection** — each of Smartphones / Keypad / Accessories can have its own PIN. Sales staff only access categories they have PINs for. Admin (master PIN) bypasses all category locks and manages them in Settings → Category Access (Set / Change / Remove per category). Inline "🔒 PIN" badge on home category cards. Session-only unlock — closing the tab re-locks.

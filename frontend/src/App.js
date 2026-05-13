@@ -159,20 +159,63 @@ const hashPIN = (pin) => {
   for (let i = 0; i < pin.length; i++) h = ((h << 5) + h) + pin.charCodeAt(i);
   return "h" + Math.abs(h).toString(36) + ":" + pin.length;
 };
+const migrateBrand = (b) => {
+  if (b.products) return b; // already migrated
+  const map = new Map();
+  const key = (r) => `${(r.model || "").toLowerCase()}|${(r.variant || "").toLowerCase()}`;
+  (b.salesList || []).forEach((r) => {
+    map.set(key(r), {
+      id: r.id || uid(),
+      model: r.model || "", variant: r.variant || "",
+      invoice: r.invoice || 0,
+      ffp: r.ffp || 0, wholeSale: r.wholeSale || 0, ifb: r.ifb || 0,
+      wsp: 0, cm: 0, pp: 0, final: 0, prm: 0,
+    });
+  });
+  (b.adminList || []).forEach((r) => {
+    const k = key(r);
+    const ex = map.get(k);
+    if (ex) {
+      ex.invoice = ex.invoice || r.invoice || 0;
+      ex.wsp = r.wsp || 0; ex.cm = r.cm || 0; ex.pp = r.pp || 0;
+      ex.final = r.final || 0; ex.prm = r.prm || 0;
+    } else {
+      map.set(k, {
+        id: r.id || uid(),
+        model: r.model || "", variant: r.variant || "",
+        invoice: r.invoice || 0,
+        ffp: 0, wholeSale: 0, ifb: 0,
+        wsp: r.wsp || 0, cm: r.cm || 0, pp: r.pp || 0,
+        final: r.final || 0, prm: r.prm || 0,
+      });
+    }
+  });
+  return { id: b.id, name: b.name, products: Array.from(map.values()) };
+};
+
+const migrate = (s) => {
+  CATEGORIES.forEach((c) => {
+    if (!s[c.key]?.brands) return;
+    s[c.key] = { brands: s[c.key].brands.map(migrateBrand) };
+  });
+  return s;
+};
+
 const loadState = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_DATA;
+    const seed = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    if (!raw) return migrate(seed);
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_DATA, ...parsed };
-  } catch { return DEFAULT_DATA; }
+    return migrate({ ...seed, ...parsed });
+  } catch { return migrate(JSON.parse(JSON.stringify(DEFAULT_DATA))); }
 };
 const saveState = (s) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} };
 
 const totalBrands = (s) => CATEGORIES.reduce((a, c) => a + (s[c.key]?.brands?.length || 0), 0);
 const totalModels = (s) => CATEGORIES.reduce((a, c) => {
   return a + (s[c.key]?.brands || []).reduce((b, br) =>
-    b + (br.salesList?.length || 0) + (br.adminList?.length || 0), 0);
+    b + (br.products?.length || 0), 0);
 }, 0);
 
 /* =========================
@@ -257,37 +300,39 @@ export default function App() {
       return { ...s, [catKey]: { brands }, lastUpdated: TODAY() };
     });
   };
-  const updateRow = (catKey, brandId, listKey, rowId, patch) => {
+  const updateRow = (catKey, brandId, rowId, patch) => {
     updateBrand(catKey, brandId, (b) => ({
       ...b,
-      [listKey]: b[listKey].map((r) => {
+      products: (b.products || []).map((r) => {
         if (r.id !== rowId) return r;
         const next = { ...r, ...patch };
-        if (listKey === "adminList") {
-          next.prm = (Number(next.final) || 0) - (Number(next.pp) || 0);
-        }
+        next.prm = (Number(next.final) || 0) - (Number(next.pp) || 0);
         return next;
       }),
     }));
   };
-  const addRow = (catKey, brandId, listKey, row) => {
-    const newRow = { id: uid(), ...row };
-    if (listKey === "adminList") {
-      newRow.prm = (Number(newRow.final) || 0) - (Number(newRow.pp) || 0);
-    }
-    updateBrand(catKey, brandId, (b) => ({ ...b, [listKey]: [...(b[listKey] || []), newRow] }));
+  const addRow = (catKey, brandId, row) => {
+    const newRow = {
+      id: uid(),
+      model: "", variant: "",
+      invoice: 0, ffp: 0, wholeSale: 0, ifb: 0,
+      wsp: 0, cm: 0, pp: 0, final: 0, prm: 0,
+      ...row,
+    };
+    newRow.prm = (Number(newRow.final) || 0) - (Number(newRow.pp) || 0);
+    updateBrand(catKey, brandId, (b) => ({ ...b, products: [...(b.products || []), newRow] }));
     showToast("Row added");
     return newRow.id;
   };
-  const deleteRow = (catKey, brandId, listKey, row) => {
-    updateBrand(catKey, brandId, (b) => ({ ...b, [listKey]: b[listKey].filter((r) => r.id !== row.id) }));
+  const deleteRow = (catKey, brandId, row) => {
+    updateBrand(catKey, brandId, (b) => ({ ...b, products: (b.products || []).filter((r) => r.id !== row.id) }));
     showToast("Deleted", "success", () => {
-      updateBrand(catKey, brandId, (b) => ({ ...b, [listKey]: [...b[listKey], row] }));
+      updateBrand(catKey, brandId, (b) => ({ ...b, products: [...(b.products || []), row] }));
       showToast("Restored");
     });
   };
   const addBrand = (catKey, name) => {
-    const newBrand = { id: uid(), name, salesList: [], adminList: [] };
+    const newBrand = { id: uid(), name, products: [] };
     setState((s) => ({
       ...s, [catKey]: { brands: [...s[catKey].brands, newBrand] }, lastUpdated: TODAY(),
     }));
@@ -402,7 +447,7 @@ export default function App() {
       let out = `🔒 ${shop.toUpperCase()} — CONFIDENTIAL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""} — ADMIN LIST\nDO NOT SHARE • ${date}\n${divider}\n\n`;
       brands.forEach((b) => {
         out += `*${b.name}*\n`;
-        (b.adminList || []).forEach((r) => {
+        (b.products || []).forEach((r) => {
           out += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
           out += `Inv: ${fmtRs(r.invoice)} | CM: ${fmtRs(r.cm)} | PP: ${fmtRs(r.pp)}\nFinal: ${fmtRs(r.final)} | PRM: ${fmtRs(r.prm)}\n\n`;
         });
@@ -428,7 +473,7 @@ export default function App() {
     let body = "";
     brands.forEach((b) => {
       if (shareScope === "all") body += `*${b.name}*\n`;
-      (b.salesList || []).forEach((r) => {
+      (b.products || []).forEach((r) => {
         body += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
         body += `Invoice: ${fmtRs(r.invoice)} | FFP: ${fmtRs(r.ffp)} | IFB: ${r.ifb || 0}\n\n`;
       });
@@ -472,9 +517,9 @@ export default function App() {
             onAddBrand={() => setAddBrandModal(true)}
             onDeleteBrand={(id, name) => setConfirmDelete({ kind: "brand", payload: { catKey: currentCat, brandId: id }, name })}
             onAddRow={() => setAddRowModal(true)}
-            onEditRow={(row, listKey) => setEditRow({ row, listKey })}
-            onDeleteRow={(row, listKey, label) => setConfirmDelete({ kind: "row", payload: { catKey: currentCat, brandId: currentBrand.id, listKey, row }, name: label })}
-            updateRow={(rowId, listKey, patch) => updateRow(currentCat, currentBrand.id, listKey, rowId, patch)}
+            onEditRow={(row) => setEditRow({ row })}
+            onDeleteRow={(row, label) => setConfirmDelete({ kind: "row", payload: { catKey: currentCat, brandId: currentBrand.id, row }, name: label })}
+            updateRow={(rowId, patch) => updateRow(currentCat, currentBrand.id, rowId, patch)}
             onShare={() => setShareModal(true)}
           />
         )}
@@ -575,22 +620,20 @@ export default function App() {
       {addRowModal && currentBrand && (
         <RowFormModal
           catKey={currentCat}
-          isAdmin={isAdmin}
           existing={null}
           onClose={() => setAddRowModal(false)}
-          onSave={(listKey, row) => { addRow(currentCat, currentBrand.id, listKey, row); setAddRowModal(false); }}
+          onSave={(row) => { addRow(currentCat, currentBrand.id, row); setAddRowModal(false); }}
         />
       )}
 
       {editRow && currentBrand && (
         <RowFormModal
           catKey={currentCat}
-          isAdmin={isAdmin}
           existing={editRow}
           onClose={() => setEditRow(null)}
-          onSave={(listKey, row) => {
+          onSave={(row) => {
             const { id, ...patch } = row;
-            updateRow(currentCat, currentBrand.id, listKey, editRow.row.id, patch);
+            updateRow(currentCat, currentBrand.id, editRow.row.id, patch);
             setEditRow(null);
             showToast("Saved");
           }}
@@ -603,7 +646,7 @@ export default function App() {
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
             const { kind, payload } = confirmDelete;
-            if (kind === "row") deleteRow(payload.catKey, payload.brandId, payload.listKey, payload.row);
+            if (kind === "row") deleteRow(payload.catKey, payload.brandId, payload.row);
             else if (kind === "brand") {
               deleteBrand(payload.catKey, payload.brandId);
               const remaining = state[payload.catKey].brands.filter((b) => b.id !== payload.brandId);
@@ -750,7 +793,7 @@ function HomeScreen({ state, onEnter }) {
       {CATEGORIES.map((c, idx) => {
         const cat = state[c.key];
         const brands = cat?.brands?.length || 0;
-        const models = (cat?.brands || []).reduce((a, b) => a + (b.salesList?.length || 0) + (b.adminList?.length || 0), 0);
+        const models = (cat?.brands || []).reduce((a, b) => a + (b.products?.length || 0), 0);
         const Icon = c.icon;
         const isLocked = !!state.categoryPins?.[c.key];
         return (
@@ -797,8 +840,7 @@ function CategoryScreen({
 }) {
   const brands = state[catKey].brands;
   const isPhoneCat = catKey !== "accessories";
-  const listKey = isAdmin ? "adminList" : "salesList";
-  const rows = currentBrand ? (currentBrand[listKey] || []) : [];
+  const rows = currentBrand ? (currentBrand.products || []) : [];
 
   const longPressTimer = useRef(null);
   const handleBrandPressStart = (b) => {
@@ -843,7 +885,6 @@ function CategoryScreen({
           rows={rows}
           isPhoneCat={isPhoneCat}
           isAdmin={isAdmin}
-          listKey={listKey}
           updateRow={updateRow}
           onEditRow={onEditRow}
           onDeleteRow={onDeleteRow}
@@ -861,13 +902,13 @@ function CategoryScreen({
 }
 
 /* ===== Rate Table ===== */
-function RateTable({ rows, isPhoneCat, isAdmin, listKey, updateRow, onEditRow, onDeleteRow, onAddRow, onShare }) {
+function RateTable({ rows, isPhoneCat, isAdmin, updateRow, onEditRow, onDeleteRow, onAddRow, onShare }) {
   const saveTimer = useRef({});
   const onCellChange = (rowId, key, val) => {
     const isNum = key !== "model" && key !== "variant";
     const v = isNum ? (val === "" ? 0 : Number(val.toString().replace(/[^\d.-]/g, ""))) : val;
     if (saveTimer.current[rowId + key]) clearTimeout(saveTimer.current[rowId + key]);
-    updateRow(rowId, listKey, { [key]: v });
+    updateRow(rowId, { [key]: v });
   };
 
   const phoneSalesCols = ["#", "Model", "Variant", "Invoice", "FFP", "Whole Sale", "IFB"];
@@ -908,7 +949,7 @@ function RateTable({ rows, isPhoneCat, isAdmin, listKey, updateRow, onEditRow, o
                 </td></tr>
               ) : rows.map((r, i) => (
                 <TableRow key={r.id} row={r} idx={i} isAdmin={isAdmin} isPhoneCat={isPhoneCat}
-                  onCellChange={onCellChange} onEdit={() => onEditRow(r, listKey)} onDelete={() => onDeleteRow(r, listKey, r.model)} />
+                  onCellChange={onCellChange} onEdit={() => onEditRow(r)} onDelete={() => onDeleteRow(r, r.model)} />
               ))}
             </tbody>
           </table>
@@ -998,7 +1039,7 @@ function SearchScreen({ state, onJump, updateRecent }) {
     const out = [];
     CATEGORIES.forEach((c) => {
       (state[c.key].brands || []).forEach((b) => {
-        (b.salesList || []).forEach((r) => {
+        (b.products || []).forEach((r) => {
           const hay = `${r.model || ""} ${r.variant || ""}`.toLowerCase();
           if (hay.includes(term)) out.push({ cat: c, brand: b, row: r });
         });
@@ -1330,46 +1371,43 @@ function AddBrandModal({ defaultCat, onClose, onSave }) {
   );
 }
 
-/* ===== Row Form Modal (Add/Edit) ===== */
-function RowFormModal({ catKey, isAdmin, existing, onClose, onSave }) {
+/* ===== Row Form Modal (Add/Edit) — Admin only ===== */
+function RowFormModal({ catKey, existing, onClose, onSave }) {
   const isPhone = catKey !== "accessories";
-  const listKey = existing?.listKey || (isAdmin ? "adminList" : "salesList");
-  const initial = existing?.row || (
-    isAdmin
-      ? { model: "", variant: "", invoice: 0, wsp: 0, cm: 0, pp: 0, final: 0 }
-      : { model: "", variant: "", invoice: 0, ffp: 0, wholeSale: 0, ifb: 0 }
-  );
+  const initial = existing?.row || {
+    model: "", variant: "",
+    invoice: 0, ffp: 0, wholeSale: 0, ifb: 0,
+    wsp: 0, cm: 0, pp: 0, final: 0,
+  };
   const [f, setF] = useState(initial);
   const num = (v) => v === "" ? 0 : Number(v.toString().replace(/[^\d.-]/g, ""));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const prm = (Number(f.final) || 0) - (Number(f.pp) || 0);
 
-  const fields = isAdmin
-    ? [
-        ["model", "Model", "text"],
-        ...(isPhone ? [["variant", "Color / Storage", "text"]] : []),
-        ["invoice", "Invoice", "num"],
-        ["wsp", "WSP", "num"],
-        ["cm", "CM Price", "num"],
-        ["pp", "PP", "num"],
-        ["final", "Final Price", "num"],
-      ]
-    : [
-        ["model", "Model", "text"],
-        ...(isPhone ? [["variant", "Color / Storage", "text"]] : []),
-        ["invoice", "Invoice", "num"],
-        ["ffp", "FFP", "num"],
-        ["wholeSale", "Whole Sale Price", "num"],
-        ["ifb", "IFB", "num"],
-      ];
+  const salesFields = [
+    ["model", "Model", "text"],
+    ...(isPhone ? [["variant", "Color / Storage", "text"]] : []),
+    ["invoice", "Invoice", "num"],
+    ["ffp", "FFP", "num"],
+    ["wholeSale", "Whole Sale", "num"],
+    ["ifb", "IFB", "num"],
+  ];
+  const adminFields = [
+    ["wsp", "WSP", "num"],
+    ["cm", "CM Price", "num"],
+    ["pp", "PP", "num"],
+    ["final", "Final Price", "num"],
+  ];
 
   return (
     <div className="az-modal-backdrop" onClick={onClose}>
       <div className="az-modal" onClick={(e) => e.stopPropagation()} data-testid="row-form-modal">
         <div className="grabber" />
         <h3>{existing ? "Edit Row" : "Add Row"}</h3>
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--az-muted)", letterSpacing: "0.08em", textTransform: "uppercase", margin: "4px 0 8px" }}>Sales View Fields</div>
         <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr 1fr" : "1fr", gap: 10 }}>
-          {fields.map(([k, label, type]) => (
+          {salesFields.map(([k, label, type]) => (
             <div key={k}>
               <label className="az-label">{label}{type === "num" ? " (Rs.)" : ""}</label>
               <input
@@ -1383,15 +1421,34 @@ function RowFormModal({ catKey, isAdmin, existing, onClose, onSave }) {
             </div>
           ))}
         </div>
-        {isAdmin && (
-          <div style={{ marginTop: 14, padding: 12, background: "var(--az-bg)", borderRadius: 10, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, color: "var(--az-muted)" }}>PRM (auto)</span>
-            <span className={prm >= 0 ? "az-prm-pos" : "az-prm-neg"} style={{ fontWeight: 700 }}>{fmtRs(prm)}</span>
-          </div>
-        )}
+
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--az-accent)", letterSpacing: "0.08em", textTransform: "uppercase", margin: "16px 0 8px", display: "flex", alignItems: "center", gap: 6 }}>
+          <Lock size={11} /> Admin-only Fields (Confidential)
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {adminFields.map(([k, label]) => (
+            <div key={k}>
+              <label className="az-label">{label} (Rs.)</label>
+              <input
+                className="az-input"
+                type="tel"
+                inputMode="numeric"
+                value={f[k] ?? ""}
+                onChange={(e) => set(k, num(e.target.value))}
+                data-testid={`form-${k}`}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 14, padding: 12, background: "var(--az-bg)", borderRadius: 10, display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, color: "var(--az-muted)" }}>PRM (auto = Final − PP)</span>
+          <span className={prm >= 0 ? "az-prm-pos" : "az-prm-neg"} style={{ fontWeight: 700 }}>{fmtRs(prm)}</span>
+        </div>
+
         <div className="az-modal-actions">
           <button className="az-btn az-btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="az-btn az-btn-primary" disabled={!f.model?.trim()} onClick={() => onSave(listKey, f)} data-testid="row-save-btn">Save</button>
+          <button className="az-btn az-btn-primary" disabled={!f.model?.trim()} onClick={() => onSave(f)} data-testid="row-save-btn">Save</button>
         </div>
       </div>
     </div>
