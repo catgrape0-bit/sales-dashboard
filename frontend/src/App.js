@@ -3,7 +3,7 @@ import {
   Smartphone, Phone, Headphones, Search, Share2, Settings, Home as HomeIcon,
   Lock, Unlock, Plus, Trash2, X, ChevronRight, Copy, MessageCircle,
   Download, Upload, RotateCcw, Check, AlertTriangle, ArrowLeft, Edit3,
-  Eye, EyeOff, KeyRound
+  Eye, EyeOff, KeyRound, Store, ChevronDown
 } from "lucide-react";
 
 /* =========================
@@ -159,6 +159,10 @@ const hashPIN = (pin) => {
   for (let i = 0; i < pin.length; i++) h = ((h << 5) + h) + pin.charCodeAt(i);
   return "h" + Math.abs(h).toString(36) + ":" + pin.length;
 };
+const PRICE_FIELDS = ["invoice", "ffp", "wholeSale", "ifb", "wsp", "cm", "pp", "final", "prm"];
+const blankPrices = () => ({ invoice: 0, ffp: 0, wholeSale: 0, ifb: 0, wsp: 0, cm: 0, pp: 0, final: 0, prm: 0 });
+const getP = (product, branchId) => (product?.priceBy?.[branchId]) || blankPrices();
+
 const migrateBrand = (b) => {
   if (b.products) return b; // already migrated
   const map = new Map();
@@ -193,10 +197,35 @@ const migrateBrand = (b) => {
   return { id: b.id, name: b.name, products: Array.from(map.values()) };
 };
 
+const migrateProductPrices = (b, defaultBranchId) => {
+  if (!b.products) return b;
+  return {
+    ...b,
+    products: b.products.map((p) => {
+      if (p.priceBy) return p; // already migrated
+      const { id, model, variant, ...flat } = p;
+      const prices = { ...blankPrices(), ...flat };
+      return { id, model, variant, priceBy: { [defaultBranchId]: prices } };
+    }),
+  };
+};
+
 const migrate = (s) => {
+  // Ensure branches array
+  if (!Array.isArray(s.branches) || s.branches.length === 0) {
+    s.branches = [{ id: "main", name: "Main Branch", pin: null }];
+  }
+  if (!s.activeBranchId || !s.branches.find((b) => b.id === s.activeBranchId)) {
+    s.activeBranchId = s.branches[0].id;
+  }
+  const defBranch = s.branches[0].id;
   CATEGORIES.forEach((c) => {
     if (!s[c.key]?.brands) return;
-    s[c.key] = { brands: s[c.key].brands.map(migrateBrand) };
+    s[c.key] = {
+      brands: s[c.key].brands
+        .map(migrateBrand)
+        .map((b) => migrateProductPrices(b, defBranch)),
+    };
   });
   return s;
 };
@@ -229,9 +258,13 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPulse, setAdminPulse] = useState(false);
   const [unlockedCats, setUnlockedCats] = useState({}); // session: { smartphones: true, ... }
-  const [catPinModal, setCatPinModal] = useState(null); // { catKey, mode: 'verify'|'set'|'change' }
+  const [unlockedBranches, setUnlockedBranches] = useState({}); // session: { branchId: true }
+  const [catPinModal, setCatPinModal] = useState(null);
+  const [branchPinModal, setBranchPinModal] = useState(null); // { branchId, mode }
+  const [pendingBranchSwitch, setPendingBranchSwitch] = useState(null);
+  const [branchSwitcherOpen, setBranchSwitcherOpen] = useState(false);
   const [pendingCatEnter, setPendingCatEnter] = useState(null);
-  const [pwModal, setPwModal] = useState(null); // { mode: 'verify'|'set'|'change', onSuccess }
+  const [pwModal, setPwModal] = useState(null);
 
   // modals
   const [pinModal, setPinModal] = useState(null); // null | 'set' | 'verify' | 'change'
@@ -294,6 +327,9 @@ export default function App() {
   }, []);
 
   /* ---------- DATA OPS ---------- */
+  const branchId = state.activeBranchId;
+  const activeBranch = state.branches?.find((b) => b.id === branchId) || state.branches?.[0];
+
   const updateBrand = (catKey, brandId, mutator) => {
     setState((s) => {
       const brands = s[catKey].brands.map((b) => (b.id === brandId ? mutator(b) : b));
@@ -305,21 +341,29 @@ export default function App() {
       ...b,
       products: (b.products || []).map((r) => {
         if (r.id !== rowId) return r;
-        const next = { ...r, ...patch };
-        next.prm = (Number(next.final) || 0) - (Number(next.pp) || 0);
+        const next = { ...r };
+        if ("model" in patch) next.model = patch.model;
+        if ("variant" in patch) next.variant = patch.variant;
+        const pricePatch = {};
+        PRICE_FIELDS.forEach((f) => { if (f in patch) pricePatch[f] = patch[f]; });
+        if (Object.keys(pricePatch).length > 0) {
+          const cur = { ...blankPrices(), ...(r.priceBy?.[branchId] || {}), ...pricePatch };
+          cur.prm = (Number(cur.final) || 0) - (Number(cur.pp) || 0);
+          next.priceBy = { ...(r.priceBy || {}), [branchId]: cur };
+        }
         return next;
       }),
     }));
   };
   const addRow = (catKey, brandId, row) => {
+    const { id: _ignored, model, variant, ...prices } = row;
+    const priceObj = { ...blankPrices(), ...prices };
+    priceObj.prm = (Number(priceObj.final) || 0) - (Number(priceObj.pp) || 0);
     const newRow = {
       id: uid(),
-      model: "", variant: "",
-      invoice: 0, ffp: 0, wholeSale: 0, ifb: 0,
-      wsp: 0, cm: 0, pp: 0, final: 0, prm: 0,
-      ...row,
+      model: model || "", variant: variant || "",
+      priceBy: { [branchId]: priceObj },
     };
-    newRow.prm = (Number(newRow.final) || 0) - (Number(newRow.pp) || 0);
     updateBrand(catKey, brandId, (b) => ({ ...b, products: [...(b.products || []), newRow] }));
     showToast("Row added");
     return newRow.id;
@@ -344,6 +388,77 @@ export default function App() {
       ...s, [catKey]: { brands: s[catKey].brands.filter((b) => b.id !== brandId) }, lastUpdated: TODAY(),
     }));
     showToast("Brand deleted");
+  };
+
+  /* ---------- BRANCH OPS ---------- */
+  const switchBranch = (id) => {
+    const target = state.branches.find((b) => b.id === id);
+    if (!target) return;
+    if (!isAdmin && target.pin && !unlockedBranches[id]) {
+      setPendingBranchSwitch(id);
+      setBranchPinModal({ branchId: id, mode: "verify" });
+      return;
+    }
+    setState((s) => ({ ...s, activeBranchId: id }));
+    setBranchSwitcherOpen(false);
+    showToast(`Switched to ${target.name}`);
+  };
+
+  const addBranchHelper = (name) => {
+    const newId = uid();
+    setState((s) => {
+      const ns = { ...s, branches: [...s.branches, { id: newId, name, pin: null }] };
+      // Copy prices from current active branch to give new branch a baseline
+      const copyFrom = s.activeBranchId;
+      CATEGORIES.forEach((c) => {
+        if (!ns[c.key]?.brands) return;
+        ns[c.key] = {
+          brands: ns[c.key].brands.map((b) => ({
+            ...b,
+            products: (b.products || []).map((p) => ({
+              ...p,
+              priceBy: { ...(p.priceBy || {}), [newId]: { ...((p.priceBy && p.priceBy[copyFrom]) || blankPrices()) } },
+            })),
+          })),
+        };
+      });
+      return ns;
+    });
+    showToast("Branch added");
+    return newId;
+  };
+
+  const renameBranch = (id, name) => {
+    setState((s) => ({ ...s, branches: s.branches.map((b) => b.id === id ? { ...b, name } : b) }));
+    showToast("Renamed");
+  };
+
+  const removeBranch = (id) => {
+    if (state.branches.length <= 1) { showToast("Need at least one branch", "warn"); return; }
+    setState((s) => {
+      const remaining = s.branches.filter((b) => b.id !== id);
+      const newActive = s.activeBranchId === id ? remaining[0].id : s.activeBranchId;
+      const ns = { ...s, branches: remaining, activeBranchId: newActive };
+      CATEGORIES.forEach((c) => {
+        if (!ns[c.key]?.brands) return;
+        ns[c.key] = {
+          brands: ns[c.key].brands.map((b) => ({
+            ...b,
+            products: (b.products || []).map((p) => {
+              const { [id]: _drop, ...rest } = p.priceBy || {};
+              return { ...p, priceBy: rest };
+            }),
+          })),
+        };
+      });
+      return ns;
+    });
+    showToast("Branch removed");
+  };
+
+  const setBranchPin = (id, pin) => {
+    setState((s) => ({ ...s, branches: s.branches.map((b) => b.id === id ? { ...b, pin: pin ? hashPIN(pin) : null } : b) }));
+    if (!pin) setUnlockedBranches((u) => ({ ...u, [id]: false }));
   };
 
   /* ---------- PIN ---------- */
@@ -444,12 +559,13 @@ export default function App() {
     const addr = state.shopAddress ? `\n📍 ${state.shopAddress}` : "";
 
     if (isAdmin) {
-      let out = `🔒 ${shop.toUpperCase()} — CONFIDENTIAL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""} — ADMIN LIST\nDO NOT SHARE • ${date}\n${divider}\n\n`;
+      let out = `🔒 ${shop.toUpperCase()} — CONFIDENTIAL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""} — ADMIN LIST\nBranch: ${activeBranch?.name || "Main"} • ${date}\nDO NOT SHARE\n${divider}\n\n`;
       brands.forEach((b) => {
         out += `*${b.name}*\n`;
         (b.products || []).forEach((r) => {
+          const p = getP(r, branchId);
           out += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
-          out += `Inv: ${fmtRs(r.invoice)} | CM: ${fmtRs(r.cm)} | PP: ${fmtRs(r.pp)}\nFinal: ${fmtRs(r.final)} | PRM: ${fmtRs(r.prm)}\n\n`;
+          out += `Inv: ${fmtRs(p.invoice)} | CM: ${fmtRs(p.cm)} | PP: ${fmtRs(p.pp)}\nFinal: ${fmtRs(p.final)} | PRM: ${fmtRs(p.prm)}\n\n`;
         });
       });
       return out.trim();
@@ -457,16 +573,16 @@ export default function App() {
 
     // Sales templates
     const brandLine = (shareScope === "brand" && currentBrand) ? " — " + currentBrand.name : "";
+    const branchLine = `\n🏬 ${activeBranch?.name || "Main"}`;
     let header = "", footer = "";
     if (shareTpl === "casual") {
-      header = `Assalam-o-Alaikum 👋\n*${shop}* — Updated Rates\n${cat}${brandLine}\n${date}\n${divider}\n\n`;
+      header = `Assalam-o-Alaikum 👋\n*${shop}* — Updated Rates\n${cat}${brandLine}${branchLine}\n${date}\n${divider}\n\n`;
       footer = `\n${divider}\nOrder ke liye message karein 👇${wa}${addr}\nShukriya! 🙏`;
     } else if (shareTpl === "promo") {
-      header = `🔥 *SPECIAL RATES* 🔥\n*${shop}*\n${cat}${brandLine}\n📅 ${date}\n${divider}\n\n`;
+      header = `🔥 *SPECIAL RATES* 🔥\n*${shop}*${branchLine}\n${cat}${brandLine}\n📅 ${date}\n${divider}\n\n`;
       footer = `\n${divider}\n✅ Original Stock — Direct Importer\n✅ Bulk Discount Available\n✅ All Pakistan Delivery${wa}${addr}\n\n_Hurry! Prices may change._`;
     } else {
-      // formal
-      header = `*${shop.toUpperCase()}*\n${cat}${brandLine}\nRate List • ${date}\n${divider}\n\n`;
+      header = `*${shop.toUpperCase()}*${branchLine}\n${cat}${brandLine}\nRate List • ${date}\n${divider}\n\n`;
       footer = `\n${divider}\nFor orders: ${shop}${wa}${addr}`;
     }
 
@@ -474,8 +590,9 @@ export default function App() {
     brands.forEach((b) => {
       if (shareScope === "all") body += `*${b.name}*\n`;
       (b.products || []).forEach((r) => {
+        const p = getP(r, branchId);
         body += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
-        body += `Invoice: ${fmtRs(r.invoice)} | FFP: ${fmtRs(r.ffp)} | IFB: ${r.ifb || 0}\n\n`;
+        body += `Invoice: ${fmtRs(p.invoice)} | FFP: ${fmtRs(p.ffp)} | IFB: ${p.ifb || 0}\n\n`;
       });
     });
     return (header + body + footer).trim();
@@ -492,6 +609,8 @@ export default function App() {
 
       <Header
         title={screenTitle(screen, currentCat, currentBrand)}
+        branchName={activeBranch?.name}
+        onBranchClick={() => setBranchSwitcherOpen(true)}
         isAdmin={isAdmin}
         adminPulse={adminPulse}
         onLockToggle={lockToggle}
@@ -512,6 +631,7 @@ export default function App() {
             state={state}
             catKey={currentCat}
             currentBrand={currentBrand}
+            branchId={branchId}
             onSelectBrand={setCurrentBrandId}
             isAdmin={isAdmin}
             onAddBrand={() => setAddBrandModal(true)}
@@ -526,6 +646,7 @@ export default function App() {
         {screen === "search" && (
           <SearchScreen
             state={state}
+            branchId={branchId}
             onJump={(catKey, brandId) => {
               setCurrentCat(catKey); setCurrentBrandId(brandId); setScreen("category");
             }}
@@ -546,6 +667,11 @@ export default function App() {
               if (state.masterPasswordHash) setPwModal({ mode: "change", onSuccess: () => showToast("Master password changed") });
               else setPwModal({ mode: "set", onSuccess: () => showToast("Master password set") });
             }}
+            onAddBranch={(name) => requireMaster(() => addBranchHelper(name))}
+            onRenameBranch={(id, name) => requireMaster(() => renameBranch(id, name))}
+            onRemoveBranch={(id) => requireMaster(() => removeBranch(id))}
+            onBranchPin={(id, mode) => requireMaster(() => setBranchPinModal({ branchId: id, mode }))}
+            onClearBranchPin={(id) => requireMaster(() => { setBranchPin(id, null); showToast("Branch PIN removed"); })}
             showToast={showToast}
           />
         )}
@@ -625,6 +751,7 @@ export default function App() {
       {addRowModal && currentBrand && (
         <RowFormModal
           catKey={currentCat}
+          branchId={branchId}
           existing={null}
           onClose={() => setAddRowModal(false)}
           onSave={(row) => { addRow(currentCat, currentBrand.id, row); setAddRowModal(false); }}
@@ -634,6 +761,7 @@ export default function App() {
       {editRow && currentBrand && (
         <RowFormModal
           catKey={currentCat}
+          branchId={branchId}
           existing={editRow}
           onClose={() => setEditRow(null)}
           onSave={(row) => {
@@ -705,6 +833,56 @@ export default function App() {
         />
       )}
 
+      {branchSwitcherOpen && (
+        <BranchSwitcherModal
+          branches={state.branches}
+          activeId={state.activeBranchId}
+          isAdmin={isAdmin}
+          unlockedBranches={unlockedBranches}
+          onClose={() => setBranchSwitcherOpen(false)}
+          onSelect={(id) => switchBranch(id)}
+          onManage={() => { setBranchSwitcherOpen(false); if (isAdmin) setScreen("settings"); else setPinModal(state.pinHash ? "verify" : "set"); }}
+        />
+      )}
+
+      {branchPinModal && (
+        <PinModal
+          mode={branchPinModal.mode}
+          existingHash={state.branches.find((b) => b.id === branchPinModal.branchId)?.pin}
+          subject={state.branches.find((b) => b.id === branchPinModal.branchId)?.name || "Branch"}
+          showForgot={false}
+          onClose={() => { setBranchPinModal(null); setPendingBranchSwitch(null); }}
+          onSet={(pin) => {
+            setBranchPin(branchPinModal.branchId, pin);
+            const id = branchPinModal.branchId;
+            setBranchPinModal(null);
+            showToast("Branch PIN set");
+            if (pendingBranchSwitch === id) {
+              setUnlockedBranches((u) => ({ ...u, [id]: true }));
+              setState((s) => ({ ...s, activeBranchId: id }));
+              setPendingBranchSwitch(null);
+            }
+          }}
+          onVerify={() => {
+            const id = branchPinModal.branchId;
+            setBranchPinModal(null);
+            setUnlockedBranches((u) => ({ ...u, [id]: true }));
+            if (pendingBranchSwitch === id) {
+              setState((s) => ({ ...s, activeBranchId: id }));
+              setBranchSwitcherOpen(false);
+              setPendingBranchSwitch(null);
+              showToast("Branch unlocked");
+            }
+          }}
+          onChange={(newPin) => {
+            setBranchPin(branchPinModal.branchId, newPin);
+            setBranchPinModal(null);
+            showToast("Branch PIN changed");
+          }}
+          showToast={showToast}
+        />
+      )}
+
       {toast && <ToastView toast={toast} onUndo={() => { toast.undo && toast.undo(); setToast(null); }} />}
     </div>
   );
@@ -733,7 +911,7 @@ function Splash() {
 }
 
 /* ===== Header ===== */
-function Header({ title, isAdmin, adminPulse, onLockToggle, onSettings, showBack, onBack }) {
+function Header({ title, branchName, onBranchClick, isAdmin, adminPulse, onLockToggle, onSettings, showBack, onBack }) {
   return (
     <header className="az-header no-select" data-testid="app-header">
       <div className="az-logo-wrap">
@@ -746,7 +924,15 @@ function Header({ title, isAdmin, adminPulse, onLockToggle, onSettings, showBack
         )}
         <div>
           <div className="az-brand-text">AL ZAHEER</div>
-          <div className="az-screen-title">{title}</div>
+          <button
+            onClick={onBranchClick}
+            data-testid="branch-switcher-btn"
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "var(--az-bg)", color: "var(--az-primary-3)", border: "1px solid var(--az-border)", borderRadius: 999, padding: "2px 10px", fontSize: 11.5, fontWeight: 600, cursor: "pointer", marginTop: 2 }}
+          >
+            <Store size={11} />
+            <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchName || "Main"}</span>
+            <ChevronDown size={12} />
+          </button>
         </div>
       </div>
       <div className="az-header-right">
@@ -840,7 +1026,7 @@ function HomeScreen({ state, onEnter }) {
 
 /* ===== Category Screen ===== */
 function CategoryScreen({
-  state, catKey, currentBrand, onSelectBrand, isAdmin,
+  state, catKey, currentBrand, branchId, onSelectBrand, isAdmin,
   onAddBrand, onDeleteBrand, onAddRow, onEditRow, onDeleteRow, updateRow, onShare,
 }) {
   const brands = state[catKey].brands;
@@ -890,6 +1076,7 @@ function CategoryScreen({
           rows={rows}
           isPhoneCat={isPhoneCat}
           isAdmin={isAdmin}
+          branchId={branchId}
           updateRow={updateRow}
           onEditRow={onEditRow}
           onDeleteRow={onDeleteRow}
@@ -907,7 +1094,7 @@ function CategoryScreen({
 }
 
 /* ===== Rate Table ===== */
-function RateTable({ rows, isPhoneCat, isAdmin, updateRow, onEditRow, onDeleteRow, onAddRow, onShare }) {
+function RateTable({ rows, isPhoneCat, isAdmin, branchId, updateRow, onEditRow, onDeleteRow, onAddRow, onShare }) {
   const saveTimer = useRef({});
   const onCellChange = (rowId, key, val) => {
     const isNum = key !== "model" && key !== "variant";
@@ -953,7 +1140,7 @@ function RateTable({ rows, isPhoneCat, isAdmin, updateRow, onEditRow, onDeleteRo
                   </div>
                 </td></tr>
               ) : rows.map((r, i) => (
-                <TableRow key={r.id} row={r} idx={i} isAdmin={isAdmin} isPhoneCat={isPhoneCat}
+                <TableRow key={r.id} row={r} idx={i} isAdmin={isAdmin} isPhoneCat={isPhoneCat} branchId={branchId}
                   onCellChange={onCellChange} onEdit={() => onEditRow(r)} onDelete={() => onDeleteRow(r, r.model)} />
               ))}
             </tbody>
@@ -971,9 +1158,10 @@ function RateTable({ rows, isPhoneCat, isAdmin, updateRow, onEditRow, onDeleteRo
   );
 }
 
-function TableRow({ row, idx, isAdmin, isPhoneCat, onCellChange, onEdit, onDelete }) {
+function TableRow({ row, idx, isAdmin, isPhoneCat, branchId, onCellChange, onEdit, onDelete }) {
   const [flash, setFlash] = useState(false);
   const tap = () => { setFlash(true); setTimeout(() => setFlash(false), 600); };
+  const p = getP(row, branchId);
 
   const Cell = ({ val, k, num = false, readonly = false }) => {
     if (!isAdmin || readonly) {
@@ -984,6 +1172,7 @@ function TableRow({ row, idx, isAdmin, isPhoneCat, onCellChange, onEdit, onDelet
         <input
           className="az-cell-edit"
           defaultValue={val ?? ""}
+          key={`${row.id}-${k}-${branchId}`}
           onBlur={(e) => onCellChange(row.id, k, e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
           data-testid={`cell-${row.id}-${k}`}
@@ -997,22 +1186,22 @@ function TableRow({ row, idx, isAdmin, isPhoneCat, onCellChange, onEdit, onDelet
       <td style={{ fontWeight: 600, color: "var(--az-muted)" }}>{idx + 1}</td>
       <Cell val={row.model} k="model" />
       {isPhoneCat && <Cell val={row.variant} k="variant" />}
-      <Cell val={row.invoice} k="invoice" num />
+      <Cell val={p.invoice} k="invoice" num />
       {isAdmin ? (
         <>
-          <Cell val={row.wsp} k="wsp" num />
-          <Cell val={row.cm} k="cm" num />
-          <Cell val={row.pp} k="pp" num />
-          <Cell val={row.final} k="final" num />
+          <Cell val={p.wsp} k="wsp" num />
+          <Cell val={p.cm} k="cm" num />
+          <Cell val={p.pp} k="pp" num />
+          <Cell val={p.final} k="final" num />
           <td className="az-cell-num">
-            <span className={Number(row.prm) >= 0 ? "az-prm-pos" : "az-prm-neg"}>{fmtRs(row.prm)}</span>
+            <span className={Number(p.prm) >= 0 ? "az-prm-pos" : "az-prm-neg"}>{fmtRs(p.prm)}</span>
           </td>
         </>
       ) : (
         <>
-          <Cell val={row.ffp} k="ffp" num />
-          <Cell val={row.wholeSale} k="wholeSale" num />
-          <td className="az-cell-num">{row.ifb ?? "—"}</td>
+          <Cell val={p.ffp} k="ffp" num />
+          <Cell val={p.wholeSale} k="wholeSale" num />
+          <td className="az-cell-num">{p.ifb ?? "—"}</td>
         </>
       )}
       {isAdmin && (
@@ -1033,7 +1222,7 @@ function TableRow({ row, idx, isAdmin, isPhoneCat, onCellChange, onEdit, onDelet
 }
 
 /* ===== Search ===== */
-function SearchScreen({ state, onJump, updateRecent }) {
+function SearchScreen({ state, branchId, onJump, updateRecent }) {
   const [q, setQ] = useState("");
   const inputRef = useRef(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -1101,7 +1290,7 @@ function SearchScreen({ state, onJump, updateRecent }) {
                 <div className="model">{r.model}{r.variant ? " · " + r.variant : ""}</div>
                 <div className="meta">{g.brand.name} • {g.cat.title}</div>
               </div>
-              <div className="price">{fmtRs(r.invoice)}</div>
+              <div className="price">{fmtRs(getP(r, branchId).invoice)}</div>
             </div>
           ))}
         </div>
@@ -1111,10 +1300,57 @@ function SearchScreen({ state, onJump, updateRecent }) {
 }
 
 /* ===== Settings ===== */
-function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, onCatPin, onClearCatPin, onMasterPassword, showToast }) {
+function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, onCatPin, onClearCatPin, onMasterPassword, onAddBranch, onRenameBranch, onRemoveBranch, onBranchPin, onClearBranchPin, showToast }) {
   const updateField = (k, v) => setState((s) => ({ ...s, [k]: v }));
+  const [newBranchName, setNewBranchName] = useState("");
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+
   return (
     <div className="az-content" data-testid="settings-screen">
+      <div className="az-section">
+        <h4>Branches</h4>
+        <div style={{ fontSize: 12, color: "var(--az-muted)", marginBottom: 12 }}>
+          Each branch keeps its own prices for the same products. Set per-branch PINs to restrict sales staff to their branch.
+        </div>
+        {state.branches.map((b) => (
+          <div className="az-section-row" key={b.id} data-testid={`branch-row-${b.id}`} style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            {renamingId === b.id ? (
+              <div style={{ display: "flex", gap: 8 }}>
+                <input className="az-input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus data-testid={`branch-rename-input-${b.id}`} />
+                <button className="az-btn az-btn-primary" style={{ padding: "8px 12px", fontSize: 12, minHeight: 36 }} onClick={() => { if (renameValue.trim()) onRenameBranch(b.id, renameValue.trim()); setRenamingId(null); }} data-testid={`branch-rename-save-${b.id}`}>Save</button>
+                <button className="az-btn az-btn-ghost" style={{ padding: "8px 12px", fontSize: 12, minHeight: 36 }} onClick={() => setRenamingId(null)}>Cancel</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div>
+                  <div className="label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Store size={14} color="var(--az-primary)" /> {b.name}
+                    {state.activeBranchId === b.id && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "var(--az-accent-lite)", color: "var(--az-primary-3)", fontWeight: 700 }}>ACTIVE</span>}
+                  </div>
+                  <div className="sub">{b.pin ? "🔒 PIN protected" : "🔓 Open access"}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button className="az-btn az-btn-ghost" style={{ padding: "6px 10px", fontSize: 11, minHeight: 32 }} onClick={() => { setRenameValue(b.name); setRenamingId(b.id); }} data-testid={`branch-rename-${b.id}`}>Rename</button>
+                  <button className="az-btn az-btn-ghost" style={{ padding: "6px 10px", fontSize: 11, minHeight: 32 }} onClick={() => onBranchPin(b.id, b.pin ? "change" : "set")} data-testid={`branch-pin-${b.id}`}>{b.pin ? "Change PIN" : "Set PIN"}</button>
+                  {b.pin && <button className="az-btn az-btn-ghost" style={{ padding: "6px 10px", fontSize: 11, minHeight: 32, color: "var(--az-warn)" }} onClick={() => onClearBranchPin(b.id)} data-testid={`branch-pin-remove-${b.id}`}>Remove PIN</button>}
+                  {state.branches.length > 1 && (
+                    <button className="az-btn az-btn-ghost" style={{ padding: "6px 10px", fontSize: 11, minHeight: 32, color: "var(--az-danger)" }} onClick={() => { if (window.confirm(`Delete branch "${b.name}"? Its prices will be lost.`)) onRemoveBranch(b.id); }} data-testid={`branch-delete-${b.id}`}>Delete</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <input className="az-input" placeholder="New branch name (e.g. Lahore)" value={newBranchName} onChange={(e) => setNewBranchName(e.target.value)} data-testid="new-branch-input" />
+          <button className="az-btn az-btn-primary" style={{ padding: "10px 14px", fontSize: 13 }} disabled={!newBranchName.trim()} onClick={() => { onAddBranch(newBranchName.trim()); setNewBranchName(""); }} data-testid="add-branch-btn">
+            <Plus size={14} style={{ verticalAlign: "middle", marginRight: 4 }} /> Add
+          </button>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: "var(--az-muted)" }}>New branches inherit current active branch's prices as baseline. Edit them per branch after creation.</div>
+      </div>
+
       <div className="az-section">
         <h4>Category Access</h4>
         <div style={{ fontSize: 12, color: "var(--az-muted)", marginBottom: 8 }}>
@@ -1244,22 +1480,62 @@ function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onRe
       <div className="az-section">
         <h4>App Info</h4>
         <div className="az-section-row">
-          <div>
-            <div className="label">App</div>
-            <div className="sub">AL ZAHEER RETAIL RATELIST PANEL</div>
-          </div>
+          <div><div className="label">App</div><div className="sub">AL ZAHEER RETAIL RATELIST PANEL</div></div>
         </div>
         <div className="az-section-row">
-          <div>
-            <div className="label">Version</div>
-            <div className="sub">{APP_VERSION}</div>
-          </div>
+          <div><div className="label">Version</div><div className="sub">{APP_VERSION}</div></div>
         </div>
         <div className="az-section-row">
-          <div>
-            <div className="label">Tagline</div>
-            <div className="sub" style={{ fontStyle: "italic" }}>Smart Pricing. Trusted Business.</div>
-          </div>
+          <div><div className="label">Tagline</div><div className="sub" style={{ fontStyle: "italic" }}>Smart Pricing. Trusted Business.</div></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Branch Switcher Modal ===== */
+function BranchSwitcherModal({ branches, activeId, isAdmin, unlockedBranches, onClose, onSelect, onManage }) {
+  return (
+    <div className="az-modal-backdrop" onClick={onClose}>
+      <div className="az-modal" onClick={(e) => e.stopPropagation()} data-testid="branch-switcher-modal">
+        <div className="grabber" />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <Store size={20} color="var(--az-primary)" />
+          <h3 style={{ margin: 0 }}>Switch Branch</h3>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {branches.map((b) => {
+            const active = b.id === activeId;
+            const locked = !isAdmin && b.pin && !unlockedBranches[b.id];
+            return (
+              <button
+                key={b.id}
+                onClick={() => onSelect(b.id)}
+                data-testid={`branch-option-${b.id}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "14px 14px",
+                  borderRadius: 14,
+                  border: active ? "2px solid var(--az-accent)" : "1px solid var(--az-border)",
+                  background: active ? "var(--az-accent-lite)" : "var(--az-surface)",
+                  color: "var(--az-primary-3)",
+                  cursor: "pointer", textAlign: "left",
+                  transition: "all 0.18s",
+                }}
+              >
+                <Store size={16} color="var(--az-primary)" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{b.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--az-muted)" }}>{locked ? "🔒 PIN required" : (b.pin ? "🔒 PIN protected (unlocked)" : "🔓 Open access")}</div>
+                </div>
+                {active && <Check size={16} color="var(--az-success)" />}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="az-btn az-btn-ghost" onClick={onClose} style={{ flex: 1 }} data-testid="branch-switcher-close">Close</button>
+          <button className="az-btn az-btn-primary" onClick={onManage} style={{ flex: 1 }} data-testid="branch-manage-btn">{isAdmin ? "Manage" : "Admin"}</button>
         </div>
       </div>
     </div>
@@ -1377,13 +1653,11 @@ function AddBrandModal({ defaultCat, onClose, onSave }) {
 }
 
 /* ===== Row Form Modal (Add/Edit) — Admin only ===== */
-function RowFormModal({ catKey, existing, onClose, onSave }) {
+function RowFormModal({ catKey, branchId, existing, onClose, onSave }) {
   const isPhone = catKey !== "accessories";
-  const initial = existing?.row || {
-    model: "", variant: "",
-    invoice: 0, ffp: 0, wholeSale: 0, ifb: 0,
-    wsp: 0, cm: 0, pp: 0, final: 0,
-  };
+  const initial = existing?.row
+    ? { model: existing.row.model || "", variant: existing.row.variant || "", ...getP(existing.row, branchId) }
+    : { model: "", variant: "", ...blankPrices() };
   const [f, setF] = useState(initial);
   const num = (v) => v === "" ? 0 : Number(v.toString().replace(/[^\d.-]/g, ""));
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
