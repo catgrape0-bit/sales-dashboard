@@ -551,7 +551,12 @@ export default function App() {
         )}
       </div>
 
-      <BottomNav screen={screen} setScreen={setScreen} onShare={() => { if (screen === "category") setShareModal(true); else showToast("Open a brand to share", "warn"); }} />
+      <BottomNav
+        screen={screen}
+        setScreen={setScreen}
+        onShare={() => { if (screen === "category") setShareModal(true); else showToast("Open a brand to share", "warn"); }}
+        onSettings={() => isAdmin ? setScreen("settings") : setPinModal(state.pinHash ? "verify" : "set")}
+      />
 
       {/* MODALS */}
       {pinModal && (
@@ -760,7 +765,7 @@ function Header({ title, isAdmin, adminPulse, onLockToggle, onSettings, showBack
 }
 
 /* ===== Bottom Nav ===== */
-function BottomNav({ screen, setScreen, onShare }) {
+function BottomNav({ screen, setScreen, onShare, onSettings }) {
   return (
     <nav className="az-bottom-nav no-select" data-testid="bottom-nav">
       <button className={`az-nav-btn ${screen === "home" ? "active" : ""}`} onClick={() => setScreen("home")} data-testid="nav-home-btn">
@@ -772,7 +777,7 @@ function BottomNav({ screen, setScreen, onShare }) {
       <button className="az-nav-btn" onClick={onShare} data-testid="nav-share-btn">
         <Share2 size={20} /><span>Share</span>
       </button>
-      <button className={`az-nav-btn ${screen === "settings" ? "active" : ""}`} onClick={() => setScreen("settings")} data-testid="nav-settings-btn">
+      <button className={`az-nav-btn ${screen === "settings" ? "active" : ""}`} onClick={onSettings} data-testid="nav-settings-btn">
         <Settings size={20} /><span>Settings</span>
       </button>
     </nav>
