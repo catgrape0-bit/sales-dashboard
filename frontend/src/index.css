@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
 :root {
   /* Light Blue + White Modern Theme */
@@ -38,13 +38,13 @@
 html, body, #root {
   margin: 0; padding: 0; height: 100%;
   background: var(--az-bg);
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   color: var(--az-text);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
 }
 
-.font-brand { font-family: 'Playfair Display', Georgia, serif; letter-spacing: 0.01em; }
+.font-brand { font-family: 'Inter', sans-serif; letter-spacing: 0.01em; }
 
 /* ====== APP SHELL ====== */
 .az-app {
@@ -72,11 +72,11 @@ html, body, #root {
   background: linear-gradient(135deg, var(--az-accent-lite), var(--az-accent-soft));
   border: 1.5px solid var(--az-accent);
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Playfair Display', serif;
+  font-family: 'Inter', sans-serif;
   color: var(--az-primary-3); font-weight: 800; font-size: 17px;
   box-shadow: 0 4px 12px rgba(14,165,233,0.18);
 }
-.az-brand-text { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 18px; letter-spacing: 0.04em; color: var(--az-primary-3); }
+.az-brand-text { font-family: 'Inter', sans-serif; font-weight: 800; font-size: 18px; letter-spacing: 0.12em; color: var(--az-primary-3); text-transform: uppercase; }
 .az-screen-title { font-size: 12px; color: var(--az-muted); font-weight: 500; margin-top: 1px; }
 .az-header-right { display: flex; align-items: center; gap: 8px; }
 .az-role-pill {
@@ -166,7 +166,7 @@ html, body, #root {
 .az-cat-card.accessories .az-cat-icon { background: #CFFAFE; color: #0E7490; }
 
 .az-cat-meta h3 {
-  font-family: 'Playfair Display', serif;
+  font-family: 'Inter', sans-serif;
   margin: 0 0 4px; font-size: 20px; font-weight: 700; color: var(--az-primary-3);
   letter-spacing: 0.01em;
 }
@@ -189,12 +189,12 @@ html, body, #root {
   background: var(--az-surface); border: 1px solid var(--az-border);
   border-radius: 14px; padding: 14px 10px; text-align: center;
 }
-.az-summary-card .v { font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 700; color: var(--az-primary-3); }
+.az-summary-card .v { font-family: 'Inter', sans-serif; font-size: 24px; font-weight: 700; color: var(--az-primary-3); }
 .az-summary-card .l { font-size: 10.5px; color: var(--az-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; font-weight: 600; }
 
 .az-tagline {
   text-align: center; margin: 22px 0 6px;
-  font-family: 'Playfair Display', serif; font-style: italic;
+  font-family: 'Inter', sans-serif; font-style: italic;
   color: var(--az-muted); font-size: 14px;
 }
 
@@ -333,7 +333,7 @@ html, body, #root {
 }
 @keyframes slide-up { from { transform: translateY(40px); opacity: 0.3; } to { transform: translateY(0); opacity: 1; } }
 .az-modal h3 {
-  margin: 0 0 14px; font-family: 'Playfair Display', serif; font-size: 22px; color: var(--az-primary-3);
+  margin: 0 0 14px; font-family: 'Inter', sans-serif; font-size: 22px; color: var(--az-primary-3);
 }
 .az-modal .grabber {
   width: 44px; height: 4px; background: var(--az-border-2);
@@ -343,7 +343,7 @@ html, body, #root {
 .az-input {
   width: 100%; padding: 12px 14px; border-radius: 12px;
   border: 1.5px solid var(--az-border); background: var(--az-bg);
-  font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--az-text);
+  font-family: 'Inter', sans-serif; font-size: 14px; color: var(--az-text);
   outline: none; transition: all 0.18s ease;
 }
 .az-input:focus { border-color: var(--az-accent); background: var(--az-surface); box-shadow: 0 0 0 3px rgba(14,165,233,0.12); }
@@ -355,7 +355,7 @@ html, body, #root {
 
 .az-btn {
   padding: 12px 18px; border-radius: 12px; border: none; cursor: pointer;
-  font: 600 14px 'DM Sans', sans-serif; min-height: 44px;
+  font: 600 14px 'Inter', sans-serif; min-height: 44px;
   transition: all 0.18s ease;
 }
 .az-btn-primary { background: var(--az-primary); color: #fff; }
@@ -378,6 +378,7 @@ html, body, #root {
 }
 .az-pin-dot.filled { background: var(--az-accent); border-color: var(--az-accent); }
 .az-pin-dots.shake { animation: shake 0.4s ease; }
+.az-modal-shake { animation: shake 0.4s ease; }
 @keyframes shake {
   0%,100% { transform: translateX(0); }
   20% { transform: translateX(-8px); }
@@ -389,7 +390,7 @@ html, body, #root {
 .az-pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .az-pin-key {
   background: var(--az-bg); border: 1px solid var(--az-border); border-radius: 16px;
-  font: 600 22px 'DM Sans', sans-serif; color: var(--az-primary-3);
+  font: 600 22px 'Inter', sans-serif; color: var(--az-primary-3);
   min-height: 58px; cursor: pointer;
   transition: all 0.12s ease;
 }
@@ -407,7 +408,7 @@ html, body, #root {
 .az-search-bar:focus-within { border-color: var(--az-accent); box-shadow: 0 0 0 3px rgba(14,165,233,0.10); }
 .az-search-bar input {
   flex: 1; border: none; outline: none; padding: 12px 0;
-  background: transparent; font: 400 15px 'DM Sans'; color: var(--az-text);
+  background: transparent; font: 400 15px 'Inter'; color: var(--az-text);
 }
 .az-recent-chips { display: flex; gap: 8px; padding: 0 16px 12px; flex-wrap: wrap; }
 .az-chip {
@@ -477,7 +478,7 @@ html, body, #root {
   background: rgba(255,255,255,0.10);
   border: 2px solid rgba(255,255,255,0.45);
   display: flex; align-items: center; justify-content: center;
-  font-family: 'Playfair Display', serif; color: #fff;
+  font-family: 'Inter', sans-serif; color: #fff;
   font-size: 52px; font-weight: 800;
   position: relative; overflow: hidden;
   animation: splash-scale 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.2);
@@ -492,7 +493,7 @@ html, body, #root {
 @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 
 .az-splash-name {
-  font-family: 'Playfair Display', serif; color: #fff;
+  font-family: 'Inter', sans-serif; color: #fff;
   font-size: 24px; font-weight: 700; margin-top: 22px; letter-spacing: 0.22em;
   animation: fade-in 0.6s ease 0.5s both;
 }
@@ -518,7 +519,7 @@ html, body, #root {
   border-radius: 16px; padding: 16px 18px; margin-bottom: 14px;
 }
 .az-section h4 {
-  margin: 0 0 12px; font-family: 'Playfair Display', serif;
+  margin: 0 0 12px; font-family: 'Inter', sans-serif;
   font-size: 17px; color: var(--az-primary-3);
 }
 .az-section-row {

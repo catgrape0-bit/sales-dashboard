@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import {
   Smartphone, Phone, Headphones, Search, Share2, Settings, Home as HomeIcon,
   Lock, Unlock, Plus, Trash2, X, ChevronRight, Copy, MessageCircle,
-  Download, Upload, RotateCcw, Check, AlertTriangle, ArrowLeft, Edit3
+  Download, Upload, RotateCcw, Check, AlertTriangle, ArrowLeft, Edit3,
+  Eye, EyeOff, KeyRound
 } from "lucide-react";
 
 /* =========================
@@ -41,6 +42,7 @@ const DEFAULT_DATA = {
   shopAddress: "",
   shareTemplate: "formal", // formal | casual | promo
   categoryPins: { smartphones: null, keypad: null, accessories: null },
+  masterPasswordHash: null, // alphanumeric master password to gate ALL PIN management
   smartphones: {
     brands: [
       {
@@ -186,6 +188,7 @@ export default function App() {
   const [unlockedCats, setUnlockedCats] = useState({}); // session: { smartphones: true, ... }
   const [catPinModal, setCatPinModal] = useState(null); // { catKey, mode: 'verify'|'set'|'change' }
   const [pendingCatEnter, setPendingCatEnter] = useState(null);
+  const [pwModal, setPwModal] = useState(null); // { mode: 'verify'|'set'|'change', onSuccess }
 
   // modals
   const [pinModal, setPinModal] = useState(null); // null | 'set' | 'verify' | 'change'
@@ -344,6 +347,12 @@ export default function App() {
     if (!pin) setUnlockedCats((u) => ({ ...u, [catKey]: false }));
   };
 
+  /* ---------- MASTER PASSWORD GATE ---------- */
+  const requireMaster = useCallback((callback) => {
+    if (!state.masterPasswordHash) { callback(); return; }
+    setPwModal({ mode: "verify", onSuccess: callback });
+  }, [state.masterPasswordHash]);
+
   const currentBrand = useMemo(() => {
     if (!currentBrandId) return null;
     return state[currentCat]?.brands?.find((b) => b.id === currentBrandId) || null;
@@ -482,12 +491,16 @@ export default function App() {
           <SettingsScreen
             state={state}
             setState={setState}
-            onChangePin={() => setPinModal("change")}
+            onChangePin={() => requireMaster(() => setPinModal(state.pinHash ? "change" : "set"))}
             onExport={exportData}
             onImport={importData}
             onReset={() => setResetModal(true)}
-            onCatPin={(catKey, mode) => setCatPinModal({ catKey, mode })}
-            onClearCatPin={(catKey) => { setCategoryPin(catKey, null); showToast("Category PIN removed"); }}
+            onCatPin={(catKey, mode) => requireMaster(() => setCatPinModal({ catKey, mode }))}
+            onClearCatPin={(catKey) => requireMaster(() => { setCategoryPin(catKey, null); showToast("Category PIN removed"); })}
+            onMasterPassword={() => {
+              if (state.masterPasswordHash) setPwModal({ mode: "change", onSuccess: () => showToast("Master password changed") });
+              else setPwModal({ mode: "set", onSuccess: () => showToast("Master password set") });
+            }}
             showToast={showToast}
           />
         )}
@@ -627,6 +640,23 @@ export default function App() {
         />
       )}
 
+      {pwModal && (
+        <PasswordModal
+          mode={pwModal.mode}
+          existingHash={state.masterPasswordHash}
+          onClose={() => setPwModal(null)}
+          onSuccess={(newHash) => {
+            const cb = pwModal.onSuccess;
+            if (newHash !== null && newHash !== undefined) {
+              setState((s) => ({ ...s, masterPasswordHash: newHash }));
+            }
+            setPwModal(null);
+            if (cb) cb();
+          }}
+          showToast={showToast}
+        />
+      )}
+
       {toast && <ToastView toast={toast} onUndo={() => { toast.undo && toast.undo(); setToast(null); }} />}
     </div>
   );
@@ -736,7 +766,7 @@ function HomeScreen({ state, onEnter }) {
               <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {c.title}
                 {isLocked && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "var(--az-accent-lite)", color: "var(--az-primary)", fontWeight: 700, letterSpacing: "0.05em", fontFamily: "DM Sans, sans-serif" }} data-testid={`cat-lock-badge-${c.key}`}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "var(--az-accent-lite)", color: "var(--az-primary)", fontWeight: 700, letterSpacing: "0.05em", fontFamily: "Inter, sans-serif" }} data-testid={`cat-lock-badge-${c.key}`}>
                     <Lock size={10} /> PIN
                   </span>
                 )}
@@ -1035,7 +1065,7 @@ function SearchScreen({ state, onJump, updateRecent }) {
 }
 
 /* ===== Settings ===== */
-function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, onCatPin, onClearCatPin, showToast }) {
+function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, onCatPin, onClearCatPin, onMasterPassword, showToast }) {
   const updateField = (k, v) => setState((s) => ({ ...s, [k]: v }));
   return (
     <div className="az-content" data-testid="settings-screen">
@@ -1096,6 +1126,15 @@ function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onRe
 
       <div className="az-section">
         <h4>Admin Account</h4>
+        <div className="az-section-row">
+          <div>
+            <div className="label">Master Password</div>
+            <div className="sub">{state.masterPasswordHash ? "🔐 Required for any PIN change" : "Not set — PIN changes unprotected"}</div>
+          </div>
+          <button className="az-btn az-btn-ghost" onClick={onMasterPassword} data-testid="master-password-btn">
+            {state.masterPasswordHash ? "Change" : "Set"}
+          </button>
+        </div>
         <div className="az-section-row">
           <div>
             <div className="label">Admin Master PIN</div>
@@ -1448,6 +1487,112 @@ function ResetModal({ value, setValue, onCancel, onConfirm }) {
         <div className="az-modal-actions">
           <button className="az-btn az-btn-ghost" onClick={onCancel}>Cancel</button>
           <button className="az-btn az-btn-danger" disabled={!ok} onClick={onConfirm} data-testid="reset-confirm-btn">Reset</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Master Password Modal ===== */
+function PasswordModal({ mode, existingHash, onClose, onSuccess, showToast }) {
+  // mode: 'verify' | 'set' | 'change'
+  const [cur, setCur] = useState("");
+  const [pwd, setPwd] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [shake, setShake] = useState(false);
+  const MIN = 6;
+
+  const trigger = () => {
+    if (mode === "verify") {
+      if (!cur) return;
+      if (hashPIN(cur) === existingHash) onSuccess(null);
+      else { setShake(true); setCur(""); setTimeout(() => setShake(false), 450); showToast("Wrong master password", "warn"); }
+    } else if (mode === "set") {
+      if (pwd.length < MIN) { showToast(`Min ${MIN} characters`, "warn"); return; }
+      if (pwd !== confirm) { setShake(true); setTimeout(() => setShake(false), 450); showToast("Passwords don't match", "warn"); return; }
+      onSuccess(hashPIN(pwd));
+    } else if (mode === "change") {
+      if (hashPIN(cur) !== existingHash) { setShake(true); setCur(""); setTimeout(() => setShake(false), 450); showToast("Wrong current password", "warn"); return; }
+      if (pwd.length < MIN) { showToast(`Min ${MIN} characters`, "warn"); return; }
+      if (pwd !== confirm) { setShake(true); setTimeout(() => setShake(false), 450); showToast("New passwords don't match", "warn"); return; }
+      onSuccess(hashPIN(pwd));
+    }
+  };
+
+  const titles = {
+    verify: "Master Password Required",
+    set: "Set Master Password",
+    change: "Change Master Password",
+  };
+  const subs = {
+    verify: "Enter your master password to change PIN settings.",
+    set: `Minimum ${MIN} characters. Use letters, numbers, symbols.`,
+    change: "Enter your current password, then the new one.",
+  };
+
+  return (
+    <div className="az-modal-backdrop" onClick={onClose}>
+      <div className={`az-modal ${shake ? "az-modal-shake" : ""}`} onClick={(e) => e.stopPropagation()} data-testid="password-modal">
+        <div className="grabber" />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <KeyRound size={20} color="var(--az-primary)" />
+          <h3 style={{ margin: 0 }}>{titles[mode]}</h3>
+        </div>
+        <p style={{ fontSize: 12.5, color: "var(--az-muted)", margin: "6px 0 14px" }}>{subs[mode]}</p>
+
+        {(mode === "verify" || mode === "change") && (
+          <>
+            <label className="az-label">{mode === "change" ? "Current password" : "Master password"}</label>
+            <div style={{ position: "relative", marginBottom: 12 }}>
+              <input
+                className="az-input"
+                type={show ? "text" : "password"}
+                value={cur}
+                onChange={(e) => setCur(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") trigger(); }}
+                autoFocus
+                data-testid="pw-current-input"
+              />
+              <button onClick={() => setShow((s) => !s)} type="button"
+                style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", padding: 6, color: "var(--az-muted)", cursor: "pointer" }}>
+                {show ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </>
+        )}
+
+        {(mode === "set" || mode === "change") && (
+          <>
+            <label className="az-label">New password</label>
+            <input
+              className="az-input"
+              type={show ? "text" : "password"}
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              style={{ marginBottom: 12 }}
+              data-testid="pw-new-input"
+            />
+            <label className="az-label">Confirm new password</label>
+            <input
+              className="az-input"
+              type={show ? "text" : "password"}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") trigger(); }}
+              data-testid="pw-confirm-input"
+            />
+            <div style={{ marginTop: 8, fontSize: 11, color: pwd.length >= MIN ? "var(--az-success)" : "var(--az-muted)" }}>
+              {pwd.length >= MIN ? "✓" : "•"} Minimum {MIN} characters {pwd && `(${pwd.length})`}
+            </div>
+          </>
+        )}
+
+        <div className="az-modal-actions">
+          <button className="az-btn az-btn-ghost" onClick={onClose} data-testid="pw-cancel-btn">Cancel</button>
+          <button className="az-btn az-btn-primary" onClick={trigger} data-testid="pw-submit-btn">
+            {mode === "verify" ? "Unlock" : "Save"}
+          </button>
         </div>
       </div>
     </div>
