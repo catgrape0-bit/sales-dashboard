@@ -36,6 +36,10 @@ const DEFAULT_DATA = {
   recentSearches: [],
   openCount: 0,
   lastUpdated: TODAY(),
+  shopName: "Al Zaheer Retail",
+  shopWhatsApp: "",   // e.g. "+923001234567" — used for wa.me deep link
+  shopAddress: "",
+  shareTemplate: "formal", // formal | casual | promo
   smartphones: {
     brands: [
       {
@@ -187,6 +191,7 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null); // {kind, payload, name}
   const [shareModal, setShareModal] = useState(false);
   const [shareScope, setShareScope] = useState("brand");
+  const [shareTpl, setShareTpl] = useState("formal");
   const [resetModal, setResetModal] = useState(false);
   const [resetText, setResetText] = useState("");
 
@@ -355,11 +360,14 @@ export default function App() {
     const date = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
     const divider = "━━━━━━━━━━━━━━━━━━━━";
     const brands = shareScope === "all" ? state[currentCat].brands : [currentBrand].filter(Boolean);
+    const shop = state.shopName || "Al Zaheer Retail";
+    const wa = state.shopWhatsApp ? `\n📱 WhatsApp: ${state.shopWhatsApp}` : "";
+    const addr = state.shopAddress ? `\n📍 ${state.shopAddress}` : "";
 
     if (isAdmin) {
-      let out = `AL ZAHEER — CONFIDENTIAL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""} — ADMIN LIST\nDO NOT SHARE • ${date}\n${divider}\n\n`;
+      let out = `🔒 ${shop.toUpperCase()} — CONFIDENTIAL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""} — ADMIN LIST\nDO NOT SHARE • ${date}\n${divider}\n\n`;
       brands.forEach((b) => {
-        out += `${b.name}\n`;
+        out += `*${b.name}*\n`;
         (b.adminList || []).forEach((r) => {
           out += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
           out += `Inv: ${fmtRs(r.invoice)} | CM: ${fmtRs(r.cm)} | PP: ${fmtRs(r.pp)}\nFinal: ${fmtRs(r.final)} | PRM: ${fmtRs(r.prm)}\n\n`;
@@ -367,17 +375,34 @@ export default function App() {
       });
       return out.trim();
     }
-    let out = `AL ZAHEER RETAIL\n${cat}${shareScope === "brand" && currentBrand ? " — " + currentBrand.name : ""}\nRate List • ${date}\n${divider}\n\n`;
+
+    // Sales templates
+    const brandLine = (shareScope === "brand" && currentBrand) ? " — " + currentBrand.name : "";
+    let header = "", footer = "";
+    if (shareTpl === "casual") {
+      header = `Assalam-o-Alaikum 👋\n*${shop}* — Updated Rates\n${cat}${brandLine}\n${date}\n${divider}\n\n`;
+      footer = `\n${divider}\nOrder ke liye message karein 👇${wa}${addr}\nShukriya! 🙏`;
+    } else if (shareTpl === "promo") {
+      header = `🔥 *SPECIAL RATES* 🔥\n*${shop}*\n${cat}${brandLine}\n📅 ${date}\n${divider}\n\n`;
+      footer = `\n${divider}\n✅ Original Stock — Direct Importer\n✅ Bulk Discount Available\n✅ All Pakistan Delivery${wa}${addr}\n\n_Hurry! Prices may change._`;
+    } else {
+      // formal
+      header = `*${shop.toUpperCase()}*\n${cat}${brandLine}\nRate List • ${date}\n${divider}\n\n`;
+      footer = `\n${divider}\nFor orders: ${shop}${wa}${addr}`;
+    }
+
+    let body = "";
     brands.forEach((b) => {
-      if (shareScope === "all") out += `*${b.name}*\n`;
+      if (shareScope === "all") body += `*${b.name}*\n`;
       (b.salesList || []).forEach((r) => {
-        out += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
-        out += `Invoice: ${fmtRs(r.invoice)} | FFP: ${fmtRs(r.ffp)} | IFB: ${r.ifb || 0}\n\n`;
+        body += `${r.model}${r.variant ? " [" + r.variant + "]" : ""}\n`;
+        body += `Invoice: ${fmtRs(r.invoice)} | FFP: ${fmtRs(r.ffp)} | IFB: ${r.ifb || 0}\n\n`;
       });
     });
-    out += `${divider}\nFor orders: Contact Al Zaheer Retail`;
-    return out;
+    return (header + body + footer).trim();
   };
+
+  const waPhoneDigits = () => (state.shopWhatsApp || "").replace(/[^\d]/g, "");
 
   /* =========================
      RENDER SUB-SCREENS
@@ -520,14 +545,19 @@ export default function App() {
 
       {shareModal && currentBrand && (
         <ShareModal
+          isAdmin={isAdmin}
           scope={shareScope} setScope={setShareScope}
+          tpl={shareTpl} setTpl={setShareTpl}
+          shopWhatsApp={state.shopWhatsApp}
           text={buildShareText()}
           onClose={() => setShareModal(false)}
           onCopy={() => { navigator.clipboard.writeText(buildShareText()); showToast("Copied to clipboard"); }}
           onWA={() => {
-            const url = "https://wa.me/?text=" + encodeURIComponent(buildShareText());
+            const phone = waPhoneDigits();
+            const url = `https://wa.me/${phone}?text=` + encodeURIComponent(buildShareText());
             window.open(url, "_blank");
           }}
+          onEditProfile={() => { setShareModal(false); setScreen("settings"); }}
         />
       )}
 
@@ -940,8 +970,26 @@ function SearchScreen({ state, onJump, updateRecent }) {
 
 /* ===== Settings ===== */
 function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, showToast }) {
+  const updateField = (k, v) => setState((s) => ({ ...s, [k]: v }));
   return (
     <div className="az-content" data-testid="settings-screen">
+      <div className="az-section">
+        <h4>Shop Profile</h4>
+        <div className="az-section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+          <label className="az-label">Shop Name</label>
+          <input className="az-input" value={state.shopName || ""} onChange={(e) => updateField("shopName", e.target.value)} placeholder="e.g. Al Zaheer Retail" data-testid="shop-name-input" />
+        </div>
+        <div className="az-section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+          <label className="az-label">WhatsApp Number (with country code)</label>
+          <input className="az-input" value={state.shopWhatsApp || ""} onChange={(e) => updateField("shopWhatsApp", e.target.value)} placeholder="+923001234567" inputMode="tel" data-testid="shop-whatsapp-input" />
+          <div className="sub" style={{ fontSize: 11, color: "var(--az-muted)" }}>Used in share template footer + wa.me deep link</div>
+        </div>
+        <div className="az-section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+          <label className="az-label">Shop Address (optional)</label>
+          <input className="az-input" value={state.shopAddress || ""} onChange={(e) => updateField("shopAddress", e.target.value)} placeholder="e.g. Hall Road, Lahore" data-testid="shop-address-input" />
+        </div>
+      </div>
+
       <div className="az-section">
         <h4>Account</h4>
         <div className="az-section-row">
@@ -1228,19 +1276,45 @@ function ConfirmDeleteModal({ name, onCancel, onConfirm }) {
 }
 
 /* ===== Share Modal ===== */
-function ShareModal({ scope, setScope, text, onClose, onCopy, onWA }) {
+function ShareModal({ isAdmin, scope, setScope, tpl, setTpl, shopWhatsApp, text, onClose, onCopy, onWA, onEditProfile }) {
   return (
     <div className="az-modal-backdrop" onClick={onClose}>
       <div className="az-modal" onClick={(e) => e.stopPropagation()} data-testid="share-modal">
         <div className="grabber" />
         <h3>Share Rate List</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button className="az-btn" style={{ flex: 1, background: scope === "brand" ? "var(--az-navy)" : "var(--az-bg)", color: scope === "brand" ? "var(--az-gold)" : "var(--az-text)", fontSize: 12, border: scope === "brand" ? "none" : "1px solid var(--az-border)" }}
+
+        <label className="az-label">Scope</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <button className="az-btn" style={{ flex: 1, background: scope === "brand" ? "var(--az-primary)" : "var(--az-bg)", color: scope === "brand" ? "#fff" : "var(--az-text)", fontSize: 12, border: scope === "brand" ? "none" : "1px solid var(--az-border)" }}
             onClick={() => setScope("brand")} data-testid="scope-brand-btn">This Brand</button>
-          <button className="az-btn" style={{ flex: 1, background: scope === "all" ? "var(--az-navy)" : "var(--az-bg)", color: scope === "all" ? "var(--az-gold)" : "var(--az-text)", fontSize: 12, border: scope === "all" ? "none" : "1px solid var(--az-border)" }}
+          <button className="az-btn" style={{ flex: 1, background: scope === "all" ? "var(--az-primary)" : "var(--az-bg)", color: scope === "all" ? "#fff" : "var(--az-text)", fontSize: 12, border: scope === "all" ? "none" : "1px solid var(--az-border)" }}
             onClick={() => setScope("all")} data-testid="scope-all-btn">All Brands</button>
         </div>
+
+        {!isAdmin && (
+          <>
+            <label className="az-label">Template</label>
+            <div className="az-tpl-row" data-testid="template-chips">
+              {[
+                { k: "formal", l: "Formal" },
+                { k: "casual", l: "Casual 👋" },
+                { k: "promo", l: "Promo 🔥" },
+              ].map((t) => (
+                <button key={t.k} className={`az-tpl-chip ${tpl === t.k ? "active" : ""}`} onClick={() => setTpl(t.k)} data-testid={`tpl-${t.k}`}>{t.l}</button>
+              ))}
+            </div>
+          </>
+        )}
+
         <div className="wa-bubble" data-testid="share-preview">{text}</div>
+
+        {!shopWhatsApp && (
+          <div style={{ marginTop: 10, padding: 10, background: "var(--az-bg)", border: "1px dashed var(--az-accent)", borderRadius: 10, fontSize: 12, color: "var(--az-text-2)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span>💡 Add your WhatsApp number for one-tap sharing</span>
+            <button className="az-btn az-btn-ghost" style={{ padding: "6px 10px", fontSize: 11, minHeight: 32 }} onClick={onEditProfile} data-testid="add-shop-profile-btn">Add</button>
+          </div>
+        )}
+
         <div className="az-modal-actions">
           <button className="az-btn az-btn-ghost" onClick={onCopy} data-testid="share-copy-btn">
             <Copy size={14} style={{ marginRight: 6, verticalAlign: "middle" }} /> Copy

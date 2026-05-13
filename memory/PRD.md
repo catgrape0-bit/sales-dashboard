@@ -27,6 +27,11 @@ Build a production-grade, mobile-first PWA "AL ZAHEER RETAIL RATELIST PANEL" —
 - Recent searches (last 5)
 
 ## What's Been Implemented (13 Feb 2026)
+- ✅ Light Blue + White modern theme (CSS variables: sky-500/sky-700/sky-50 palette)
+- ✅ Shop Profile in Settings (name, WhatsApp number, address) — auto-injected in share templates + wa.me deep link
+- ✅ 3 WhatsApp share templates: Formal / Casual / Promo with emoji branding
+- ✅ Floating pill bottom nav + modernized FAB (gradient + rotate-on-hover)
+- ✅ Splash screen with sky-cyan-to-navy gradient + shimmer
 - ✅ Splash screen with AZ logo scale-in + gold shimmer + fade
 - ✅ Home dashboard: 3 category cards (color-coded left border) + summary stats
 - ✅ Category screen with horizontally-scrollable brand pill tabs
