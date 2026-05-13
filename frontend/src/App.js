@@ -40,6 +40,7 @@ const DEFAULT_DATA = {
   shopWhatsApp: "",   // e.g. "+923001234567" — used for wa.me deep link
   shopAddress: "",
   shareTemplate: "formal", // formal | casual | promo
+  categoryPins: { smartphones: null, keypad: null, accessories: null },
   smartphones: {
     brands: [
       {
@@ -182,6 +183,9 @@ export default function App() {
   const [currentBrandId, setCurrentBrandId] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminPulse, setAdminPulse] = useState(false);
+  const [unlockedCats, setUnlockedCats] = useState({}); // session: { smartphones: true, ... }
+  const [catPinModal, setCatPinModal] = useState(null); // { catKey, mode: 'verify'|'set'|'change' }
+  const [pendingCatEnter, setPendingCatEnter] = useState(null);
 
   // modals
   const [pinModal, setPinModal] = useState(null); // null | 'set' | 'verify' | 'change'
@@ -313,10 +317,31 @@ export default function App() {
 
   /* ---------- NAV ---------- */
   const enterCategory = (catKey) => {
+    const catPin = state.categoryPins?.[catKey];
+    if (!isAdmin && catPin && !unlockedCats[catKey]) {
+      setPendingCatEnter(catKey);
+      setCatPinModal({ catKey, mode: "verify" });
+      return;
+    }
     setCurrentCat(catKey);
     const firstBrand = state[catKey]?.brands?.[0];
     setCurrentBrandId(firstBrand ? firstBrand.id : null);
     setScreen("category");
+  };
+
+  const completeCatEnter = (catKey) => {
+    setUnlockedCats((u) => ({ ...u, [catKey]: true }));
+    setCurrentCat(catKey);
+    const firstBrand = state[catKey]?.brands?.[0];
+    setCurrentBrandId(firstBrand ? firstBrand.id : null);
+    setScreen("category");
+    setPendingCatEnter(null);
+    setCatPinModal(null);
+  };
+
+  const setCategoryPin = (catKey, pin) => {
+    setState((s) => ({ ...s, categoryPins: { ...(s.categoryPins || {}), [catKey]: pin ? hashPIN(pin) : null } }));
+    if (!pin) setUnlockedCats((u) => ({ ...u, [catKey]: false }));
   };
 
   const currentBrand = useMemo(() => {
@@ -461,6 +486,8 @@ export default function App() {
             onExport={exportData}
             onImport={importData}
             onReset={() => setResetModal(true)}
+            onCatPin={(catKey, mode) => setCatPinModal({ catKey, mode })}
+            onClearCatPin={(catKey) => { setCategoryPin(catKey, null); showToast("Category PIN removed"); }}
             showToast={showToast}
           />
         )}
@@ -473,6 +500,8 @@ export default function App() {
         <PinModal
           mode={pinModal}
           existingHash={state.pinHash}
+          subject="Admin"
+          showForgot={true}
           onClose={() => setPinModal(null)}
           onSet={(pin) => {
             setState((s) => ({ ...s, pinHash: hashPIN(pin) }));
@@ -485,6 +514,35 @@ export default function App() {
             showToast("PIN updated");
           }}
           onResetApp={() => { setPinModal(null); setResetModal(true); }}
+          showToast={showToast}
+        />
+      )}
+
+      {catPinModal && (
+        <PinModal
+          mode={catPinModal.mode}
+          existingHash={state.categoryPins?.[catPinModal.catKey]}
+          subject={CATEGORIES.find((c) => c.key === catPinModal.catKey)?.title || "Category"}
+          showForgot={false}
+          onClose={() => { setCatPinModal(null); setPendingCatEnter(null); }}
+          onSet={(pin) => {
+            setCategoryPin(catPinModal.catKey, pin);
+            const ck = catPinModal.catKey;
+            setCatPinModal(null);
+            showToast("Category PIN set");
+            if (pendingCatEnter === ck) completeCatEnter(ck);
+          }}
+          onVerify={() => {
+            const ck = catPinModal.catKey;
+            setCatPinModal(null);
+            if (pendingCatEnter === ck) completeCatEnter(ck);
+            else { setUnlockedCats((u) => ({ ...u, [ck]: true })); showToast("Unlocked"); }
+          }}
+          onChange={(newPin) => {
+            setCategoryPin(catPinModal.catKey, newPin);
+            setCatPinModal(null);
+            showToast("Category PIN changed");
+          }}
           showToast={showToast}
         />
       )}
@@ -664,6 +722,7 @@ function HomeScreen({ state, onEnter }) {
         const brands = cat?.brands?.length || 0;
         const models = (cat?.brands || []).reduce((a, b) => a + (b.salesList?.length || 0) + (b.adminList?.length || 0), 0);
         const Icon = c.icon;
+        const isLocked = !!state.categoryPins?.[c.key];
         return (
           <div
             key={c.key}
@@ -674,7 +733,14 @@ function HomeScreen({ state, onEnter }) {
           >
             <div className="az-cat-icon"><Icon size={28} /></div>
             <div className="az-cat-meta" style={{ flex: 1 }}>
-              <h3>{c.title}</h3>
+              <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {c.title}
+                {isLocked && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "var(--az-accent-lite)", color: "var(--az-primary)", fontWeight: 700, letterSpacing: "0.05em", fontFamily: "DM Sans, sans-serif" }} data-testid={`cat-lock-badge-${c.key}`}>
+                    <Lock size={10} /> PIN
+                  </span>
+                )}
+              </h3>
               <p>{brands} brand{brands !== 1 ? "s" : ""} • {models} model{models !== 1 ? "s" : ""}</p>
               <div className="updated">Last updated: {fmtDate(state.lastUpdated)}</div>
             </div>
@@ -969,10 +1035,48 @@ function SearchScreen({ state, onJump, updateRecent }) {
 }
 
 /* ===== Settings ===== */
-function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, showToast }) {
+function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onReset, onCatPin, onClearCatPin, showToast }) {
   const updateField = (k, v) => setState((s) => ({ ...s, [k]: v }));
   return (
     <div className="az-content" data-testid="settings-screen">
+      <div className="az-section">
+        <h4>Category Access</h4>
+        <div style={{ fontSize: 12, color: "var(--az-muted)", marginBottom: 8 }}>
+          Set a PIN per category so each sales person only opens their assigned section. Admin always has full access.
+        </div>
+        {CATEGORIES.map((c) => {
+          const hasPin = !!state.categoryPins?.[c.key];
+          return (
+            <div className="az-section-row" key={c.key} data-testid={`cat-access-row-${c.key}`}>
+              <div>
+                <div className="label">{c.title}</div>
+                <div className="sub">{hasPin ? "🔒 PIN protected" : "🔓 Open access"}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className="az-btn az-btn-ghost"
+                  style={{ padding: "8px 12px", fontSize: 12, minHeight: 36 }}
+                  onClick={() => onCatPin(c.key, hasPin ? "change" : "set")}
+                  data-testid={`cat-pin-${c.key}-btn`}
+                >
+                  {hasPin ? "Change PIN" : "Set PIN"}
+                </button>
+                {hasPin && (
+                  <button
+                    className="az-btn az-btn-ghost"
+                    style={{ padding: "8px 10px", fontSize: 12, minHeight: 36, color: "var(--az-danger)" }}
+                    onClick={() => onClearCatPin(c.key)}
+                    data-testid={`cat-pin-${c.key}-remove`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="az-section">
         <h4>Shop Profile</h4>
         <div className="az-section-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
@@ -991,10 +1095,10 @@ function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onRe
       </div>
 
       <div className="az-section">
-        <h4>Account</h4>
+        <h4>Admin Account</h4>
         <div className="az-section-row">
           <div>
-            <div className="label">Admin PIN</div>
+            <div className="label">Admin Master PIN</div>
             <div className="sub">{state.pinHash ? "PIN is set" : "PIN not set"}</div>
           </div>
           <button className="az-btn az-btn-ghost" onClick={onChangePin} data-testid="change-pin-btn">
@@ -1078,7 +1182,7 @@ function SettingsScreen({ state, setState, onChangePin, onExport, onImport, onRe
 }
 
 /* ===== PIN Modal ===== */
-function PinModal({ mode, existingHash, onClose, onSet, onVerify, onChange, onResetApp, showToast }) {
+function PinModal({ mode, existingHash, onClose, onSet, onVerify, onChange, onResetApp, showToast, subject = "Admin", showForgot = false }) {
   // mode: 'set' (first time), 'verify' (unlock), 'change' (current + new + confirm)
   const [pin, setPin] = useState("");
   const [stage, setStage] = useState(mode === "change" ? "current" : (mode === "set" ? "set" : "verify"));
@@ -1110,8 +1214,8 @@ function PinModal({ mode, existingHash, onClose, onSet, onVerify, onChange, onRe
   };
 
   const titles = {
-    verify: "Enter Admin PIN", set: "Set a new PIN", confirm: "Confirm PIN",
-    current: "Enter current PIN", new: "Enter new PIN", confirmChange: "Confirm new PIN",
+    verify: `Enter ${subject} PIN`, set: `Set ${subject} PIN`, confirm: "Confirm PIN",
+    current: `Enter current ${subject} PIN`, new: `Enter new ${subject} PIN`, confirmChange: "Confirm new PIN",
   };
 
   return (
@@ -1135,7 +1239,7 @@ function PinModal({ mode, existingHash, onClose, onSet, onVerify, onChange, onRe
           <button className="az-pin-key" onClick={() => push("0")} data-testid="pin-key-0">0</button>
           <button className="az-pin-key" onClick={handleEnter} style={{ background: "var(--az-navy)", color: "var(--az-gold)" }} data-testid="pin-enter">✓</button>
         </div>
-        {stage === "verify" && (
+        {stage === "verify" && showForgot && (
           <div style={{ textAlign: "center", marginTop: 14 }}>
             <button className="az-btn az-btn-ghost" onClick={onResetApp} style={{ fontSize: 12, padding: "8px 12px" }} data-testid="forgot-pin-btn">
               Forgot PIN? Reset App

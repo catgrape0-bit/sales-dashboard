@@ -27,6 +27,7 @@ Build a production-grade, mobile-first PWA "AL ZAHEER RETAIL RATELIST PANEL" —
 - Recent searches (last 5)
 
 ## What's Been Implemented (13 Feb 2026)
+- ✅ **Per-Category PIN protection** — each of Smartphones / Keypad / Accessories can have its own PIN. Sales staff only access categories they have PINs for. Admin (master PIN) bypasses all category locks and manages them in Settings → Category Access (Set / Change / Remove per category). Inline "🔒 PIN" badge on home category cards. Session-only unlock — closing the tab re-locks.
 - ✅ Light Blue + White modern theme (CSS variables: sky-500/sky-700/sky-50 palette)
 - ✅ Shop Profile in Settings (name, WhatsApp number, address) — auto-injected in share templates + wa.me deep link
 - ✅ 3 WhatsApp share templates: Formal / Casual / Promo with emoji branding
